@@ -50,13 +50,40 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Create Mint Configuration
+        run: |
+          cat > config.toml << EOF
+          [info]
+          listen_host = "0.0.0.0"
+          listen_port = 8085
+          
+          [ln]
+          ln_backend = "fakewallet"
+          
+          [fake_wallet]
+          supported_units = ["sat"]
+          fee_percent = 0.02
+          reserve_fee_min = 1
+          min_delay_time = 1
+          max_delay_time = 3
+          
+          [database]
+          engine = "sqlite"
+          EOF
+
       - name: Run cdk-mintd Docker Container
         run: |
           docker run -d --name cdk-mintd -p 8085:8085 \
-            -e CDK_MINTD_LISTEN_HOST=0.0.0.0 \
-            -e CDK_MINTD_LISTEN_PORT=8085 \
-            -e CDK_MINTD_LN_BACKEND=fakewallet \
-            cashubtc/mintd:latest-amd64
+            -v $(pwd)/config.toml:/config.toml \
+            cashubtc/mintd:latest-amd64 \
+            cdk-mintd --config /config.toml
+
+      - name: Check Container Status and Logs
+        run: |
+          echo "Container status:"
+          docker ps -a --filter name=cdk-mintd
+          echo "Container logs:"
+          docker logs cdk-mintd
 
       - name: Wait for Mint to Start
         run: |
@@ -69,6 +96,13 @@ jobs:
             echo "Attempt $i: Mint not ready, waiting 2 seconds..."
             sleep 2
           done
+          
+          # If we get here and the mint still isn't ready, show final logs
+          if ! curl -f -s http://localhost:8085/v1/info >/dev/null; then
+            echo "Final container logs:"
+            docker logs cdk-mintd
+            exit 1
+          fi
 
       - name: Test Mint Info Endpoint
         run: |
