@@ -60,6 +60,9 @@ jobs:
           mnemonic = "inherit paddle hybrid panic inform best receive noise whale dizzy virtual west"
           
           [info.logging]
+        # Where to output logs: "stdout", "file", or "both" (default: "both")
+          output = "file"
+          file_level = "debug"
           
           [mint_management_rpc]
           enabled = false
