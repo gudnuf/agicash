@@ -40,6 +40,106 @@ jobs:
       - name: Run Unit Tests
         run: bun test
 
+  integration-tests:
+    name: "Integration Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create Mint Configuration
+        run: |
+          cat > config.toml << EOF
+          [info]
+          url = "https://mint.thesimplekid.dev/"
+          listen_host = "0.0.0.0"
+          listen_port = 8085
+          mnemonic = "inherit paddle hybrid panic inform best receive noise whale dizzy virtual west"
+          
+          [info.logging]
+          output = "stdout"
+          console_level = "debug"
+          
+          [mint_management_rpc]
+          enabled = false
+          
+          [info.http_cache]
+          backend = "memory"
+          ttl = 60
+          tti = 60
+          
+          [mint_info]
+          
+          [database]
+          engine = "sqlite"
+          
+          [ln]
+          ln_backend = "fakewallet"
+          
+          [fake_wallet]
+          supported_units = ["sat", "usd"]
+          fee_percent = 0.02
+          reserve_fee_min = 1
+          min_delay_time = 1
+          max_delay_time = 3
+          EOF
+
+      - name: Run cdk-mintd Docker Container
+        run: |
+          docker run -d --name cdk-mintd -p 8085:8085 \
+            -v $(pwd)/config.toml:/config.toml \
+            cashubtc/mintd:latest-amd64 \
+            cdk-mintd --config /config.toml
+
+      - name: Check Container Status and Logs
+        run: |
+          echo "Container status:"
+          docker ps -a --filter name=cdk-mintd
+          echo "Container logs:"
+          docker logs cdk-mintd
+
+      - name: Wait for Mint to Start
+        run: |
+          echo "Waiting for mint to start..."
+          for i in {1..30}; do
+            if curl -f -s http://localhost:8085/v1/info >/dev/null; then
+              echo "Mint is ready!"
+              break
+            fi
+            echo "Attempt $i: Mint not ready, waiting 2 seconds..."
+            sleep 2
+          done
+          
+          # If we get here and the mint still isn't ready, show final logs
+          if ! curl -f -s http://localhost:8085/v1/info >/dev/null; then
+            echo "Final container logs:"
+            docker logs cdk-mintd
+            exit 1
+          fi
+
+      - name: Test Mint Info Endpoint
+        run: |
+          echo "Testing mint /v1/info endpoint..."
+          response=$(curl -s http://localhost:8085/v1/info)
+          echo "Response: $response"
+          
+          # Verify the response contains expected fields
+          if echo "$response" | grep -q '"name"' && echo "$response" | grep -q '"version"'; then
+            echo "✅ Mint info endpoint is working correctly"
+          else
+            echo "❌ Mint info endpoint response is invalid"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop cdk-mintd || true
+          docker rm cdk-mintd || true
+
   # e2e-tests:
   #   name: "E2E Tests"
   #   timeout-minutes: 20
